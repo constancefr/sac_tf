@@ -14,8 +14,6 @@ Components:
             -> we don't directly output actions, but rather a mean and stdv for a distribution
             that we'll sample to get our action.
 
-- batch norm?
-
 SAC Hyperparams (from paper abstract):
 --Shared--
     optimiser: Adam
@@ -44,11 +42,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions.normal import Normal
-
-'''
-TODO:
-- accelerate operations?
-'''
 
 class ReplayBuffer(object):
     def __init__(self, max_size, input_shape, n_actions):
@@ -170,6 +163,8 @@ class ActorNetwork(nn.Module):
         return action, log_probs
 
     def save_checkpoint(self):
+        if not os.path.exists(self.checkpoint_dir):
+            os.makedirs(self.checkpoint_dir)
         torch.save(self.state_dict(), self.checkpoint_file)
 
     def load_checkpoint(self):
@@ -217,6 +212,8 @@ class CriticNetwork(nn.Module):
         return q
 
     def save_checkpoint(self):
+        if not os.path.exists(self.checkpoint_dir):
+            os.makedirs(self.checkpoint_dir)
         torch.save(self.state_dict(), self.checkpoint_file)
 
     def load_checkpoint(self):
@@ -255,6 +252,8 @@ class ValueNetwork(nn.Module):
         return v
 
     def save_checkpoint(self):
+        if not os.path.exists(self.checkpoint_dir):
+            os.makedirs(self.checkpoint_dir)
         torch.save(self.state_dict(), self.checkpoint_file)
 
     def load_checkpoint(self):
@@ -296,21 +295,15 @@ class Agent():
         if tau is None:
             tau = self.tau
 
-        # create copy of params, modify then upload them
-        target_value_params = self.target_value.named_parameters()
-        value_params = self.value.named_parameters()
-
-        target_value_state_dict = dict(target_value_params)
-        value_state_dict = dict(value_params)
-
-        for name in value_state_dict:
-            # Polyak averaging
-            value_state_dict[name] = tau*value_state_dict[name].clone() + \
-                    (1-tau)*target_value_state_dict[name].clone()
-            
-        self.target_value.load_state_dict(value_state_dict)
+        with torch.no_grad():
+            for target_param, param in zip(self.target_value.parameters(), self.value.parameters()):
+                # Polyak update: target <- tau * online + (1 - tau) * target
+                target_param.data.mul_(1.0 - tau)
+                target_param.data.add_(tau * param.data)
 
     def save_models(self):
+        if not os.path.exists(self.checkpoint_dir):
+            os.makedirs(self.checkpoint_dir)
         print("Saving models...")
         self.actor.save_checkpoint()
         self.value.save_checkpoint()
